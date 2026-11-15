@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirDraw V2</title>
+
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: rgba(255,255,255,.08);
+    --border: rgba(255,255,255,.12);
+    --text: #f5f7ff;
+    --muted: #aab3c8;
+    --green: #35e87a;
+    --red: #ff5d6c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: Inter, Arial, sans-serif;
+    background:
+      radial-gradient(circle at top left, #243b6b 0%, transparent 35%),
+      radial-gradient(circle at bottom right, #183b36 0%, transparent 30%),
+      var(--bg);
+    color: var(--text);
+  }
+
+  .app {
+    width: min(1200px, calc(100% - 24px));
+    margin: auto;
+    padding: 24px 0 40px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    letter-spacing: -2px;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    margin-top: 8px;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+
+  button, .control {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 14px;
+    min-height: 46px;
+    padding: 10px 16px;
+    font-size: .95rem;
+  }
+
+  button {
+    cursor: pointer;
+    transition: transform .18s ease, background .18s ease;
+  }
+
+  button:hover {
+    transform: translateY(-2px);
+    background: rgba(255,255,255,.14);
+  }
+
+  button:active {
+    transform: translateY(0);
+  }
+
+  .primary {
+    background: var(--green);
+    color: #06140b;
+    border-color: transparent;
+    font-weight: bold;
+  }
+
+  .danger {
+    background: rgba(255,93,108,.16);
+  }
+
+  .control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  input[type="range"] {
+    accent-color: var(--green);
+  }
+
+  input[type="color"] {
+    width: 34px;
+    height: 30px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    overflow: hidden;
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    box-shadow: 0 30px 80px rgba(0,0,0,.4);
+  }
+
+  video, canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  video {
+    transform: scaleX(-1);
+  }
+
+  #drawingCanvas {
+    pointer-events: none;
+  }
+
+  #processingCanvas {
+    display: none;
+  }
+
+  .led-dot {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 0 20px currentColor;
+  }
+
+  .statusbar {
+    margin-top: 14px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .status {
+    font-weight: 600;
+  }
+
+  .hint {
+    color: var(--muted);
+  }
+
+  .legend {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .card {
+    padding: 16px;
+    text-align: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+  }
+
+  .card strong {
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+
+  @media (max-width: 700px) {
+    .stage { aspect-ratio: 3 / 4; }
+
+    .legend {
+      grid-template-columns: 1fr;
+    }
+
+    .toolbar {
+      align-items: stretch;
+    }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <header>
+    <h1>🎨 AirDraw <span class="green">V2</span></h1>
+    <p class="subtitle">Draw in the air with your red and green LED tip.</p>
+  </header>
+
+  <div class="toolbar">
+    <button id="startBtn" class="primary">📷 Start Camera</button>
+    <button id="undoBtn">↩️ Undo</button>
+    <button id="clearBtn" class="danger">🗑️ Clear</button>
+    <button id="saveBtn">💾 Save PNG</button>
+
+    <div class="control">
+      🎨
+      <input type="color" id="drawColor" value="#ffffff">
+    </div>
+
+    <div class="control">
+      🖌️ <span id="brushValue">7</span>
+      <input type="range" id="brushSize" min="2" max="35" value="7">
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="drawingCanvas"></canvas>
+    <canvas id="processingCanvas"></canvas>
+    <div class="led-dot" id="ledDot"></div>
+  </div>
+
+  <div class="statusbar">
+    <div class="status" id="status">⚪ Camera not started</div>
+    <div class="hint" id="hint">Green = draw • Red = move</div>
+  </div>
+
+  <div class="legend">
+    <div class="card">
+      <strong class="green">🟢 GREEN LED</strong>
+      Draw on the canvas
+    </div>
+
+    <div class="card">
+      <strong class="red">🔴 RED LED</strong>
+      Move without drawing
+    </div>
+
+    <div class="card">
+      <strong>💡 BEST TRACKING</strong>
+      Use a darker background
+    </div>
+  </div>
+
+</div>
+
+<script>
+const video = document.getElementById("video");
+const drawingCanvas = document.getElementById("drawingCanvas");
+const processingCanvas = document.getElementById("processingCanvas");
+const drawCtx = drawingCanvas.getContext("2d");
+const processCtx = processingCanvas.getContext("2d", {
+  willReadFrequently: true
+});
+
+const startBtn = document.getElementById("startBtn");
+const undoBtn = document.getElementById("undoBtn");
+const clearBtn = document.getElementById("clearBtn");
+const saveBtn = document.getElementById("saveBtn");
+
+const brushSize = document.getElementById("brushSize");
+const brushValue = document.getElementById("brushValue");
+const drawColor = document.getElementById("drawColor");
+
+const status = document.getElementById("status");
+const ledDot = document.getElementById("ledDot");
+
+let running = false;
+let previousPoint = null;
+let smoothPoint = null;
+
+let history = [];
+let drawingStarted = false;
+
+// Tracking settings
+const SAMPLE_STEP = 3;
+const MIN_PIXELS = 8;
+const SMOOTHING = 0.30;
+const MAX_JUMP = 180;
+
+brushSize.addEventListener("input", () => {
+  brushValue.textContent = brushSize.value;
+});
+
+function resizeCanvas() {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+
+  if (!width || !height) return;
+
+  // Preserve drawing before resize
+  const old = document.createElement("canvas");
+  old.width = drawingCanvas.width;
+  old.height = drawingCanvas.height;
+
+  if (old.width && old.height) {
+    old.getContext("2d").drawImage(drawingCanvas, 0, 0);
+  }
+
+  drawingCanvas.width = width;
+  drawingCanvas.height = height;
+
+  processingCanvas.width = width;
+  processingCanvas.height = height;
+
+  if (old.width && old.height) {
+    drawCtx.drawImage(
+      old,
+      0, 0, old.width, old.height,
+      0, 0, drawingCanvas.width, drawingCanvas.height
+    );
+  }
+}
+
+startBtn.addEventListener("click", async () => {
+  if (running) return;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+
+    video.srcObject = stream;
+
+    video.onloadedmetadata = () => {
+      resizeCanvas();
+      running = true;
+
+      startBtn.textContent = "✅ Camera Running";
+      status.textContent = "⚪ Looking for your LED...";
+
+      requestAnimationFrame(track);
+    };
+
+  } catch (error) {
+    console.error(error);
+    status.textContent =
+      "❌ Camera access failed. Allow camera permission and try again.";
+  }
+});
+
+
+function classifyPixel(r, g, b) {
+
+  const brightness = Math.max(r, g, b);
+
+  // Ignore dark pixels
+  if (brightness < 120) return null;
+
+  // GREEN LED
+  if (
+    g > 120 &&
+    g > r * 1.35 &&
+    g > b * 1.35
+  ) {
+    return "green";
+  }
+
+  // RED LED
+  if (
+    r > 140 &&
+    r > g * 1.45 &&
+    r > b * 1.45
+  ) {
+    return "red";
+  }
+
+  return null;
+}
+
+
+function findLED() {
+
+  const width = processingCanvas.width;
+  const height = processingCanvas.height;
+
+  processCtx.drawImage(video, 0, 0, width, height);
+
+  const image = processCtx.getImageData(
+    0, 0, width, height
+  );
+
+  const data = image.data;
+
+  const groups = {
+    green: [],
+    red: []
+  };
+
+  for (let y = 0; y < height; y += SAMPLE_STEP) {
+    for (let x = 0; x < width; x += SAMPLE_STEP) {
+
+      const i = (y * width + x) * 4;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const type = classifyPixel(r, g, b);
+
+      if (type) {
+        groups[type].push({
+          x,
+          y,
+          brightness: Math.max(r, g, b)
+        });
+      }
+    }
+  }
+
+  // Prefer green when detected because green means drawing
+  let color = null;
+  let pixels = null;
+
+  if (groups.green.length >= MIN_PIXELS) {
+    color = "green";
+    pixels = groups.green;
+  } else if (groups.red.length >= MIN_PIXELS) {
+    color = "red";
+    pixels = groups.red;
+  } else {
+    return null;
+  }
+
+  /*
+    Instead of simply averaging everything, keep
+    the brightest group of matching pixels.
+  */
+
+  pixels.sort((a, b) => b.brightness - a.brightness);
+
+  const strongest = pixels.slice(
+    0,
+    Math.min(pixels.length, 150)
+  );
+
+  let totalX = 0;
+  let totalY = 0;
+
+  for (const pixel of strongest) {
+    totalX += pixel.x;
+    totalY += pixel.y;
+  }
+
+  return {
+    color,
+    x: totalX / strongest.length,
+    y: totalY / strongest.length,
+    strength: strongest.length
+  };
+}
+
+
+function updateLEDMarker(point) {
+
+  if (!point) {
+    ledDot.style.display = "none";
+    return;
+  }
+
+  const stageRect =
+    document.getElementById("stage").getBoundingClientRect();
+
+  const x =
+    (1 - point.x / processingCanvas.width) *
+    stageRect.width;
+
+  const y =
+    (point.y / processingCanvas.height) *
+    stageRect.height;
+
+  ledDot.style.display = "block";
+  ledDot.style.left = x + "px";
+  ledDot.style.top = y + "px";
+
+  ledDot.style.color =
+    point.color === "green"
+      ? "#35e87a"
+      : "#ff5d6c";
+
+  ledDot.style.background =
+    point.color === "green"
+      ? "#35e87a"
+      : "#ff5d6c";
+}
+
+
+function processPoint(point) {
+
+  if (!smoothPoint) {
+    smoothPoint = {
+      x: point.x,
+      y: point.y
+    };
+  } else {
+    smoothPoint.x +=
+      (point.x - smoothPoint.x) * SMOOTHING;
+
+    smoothPoint.y +=
+      (point.y - smoothPoint.y) * SMOOTHING;
+  }
+
+  // Mirror X to match displayed video
+  const x =
+    drawingCanvas.width - smoothPoint.x;
+
+  const y =
+    smoothPoint.y;
+
+  const current = { x, y };
+
+  // RED = move without drawing
+  if (point.color === "red") {
+    previousPoint = current;
+    drawingStarted = false;
+
+    status.textContent = "🔴 RED — Moving without drawing";
+    return;
+  }
+
+  // GREEN = draw
+  status.textContent = "🟢 GREEN — Drawing";
+
+  if (!previousPoint || !drawingStarted) {
+    saveHistory();
+
+    previousPoint = current;
+    drawingStarted = true;
+
+    return;
+  }
+
+  const dx = current.x - previousPoint.x;
+  const dy = current.y - previousPoint.y;
+
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  // Prevent giant lines if tracking suddenly jumps
+  if (distance > MAX_JUMP) {
+    previousPoint = current;
+    return;
+  }
+
+  drawCtx.beginPath();
+  drawCtx.moveTo(
+    previousPoint.x,
+    previousPoint.y
+  );
+
+  // Quadratic curve for smoother strokes
+  const midX =
+    (previousPoint.x + current.x) / 2;
+
+  const midY =
+    (previousPoint.y + current.y) / 2;
+
+  drawCtx.quadraticCurveTo(
+    previousPoint.x,
+    previousPoint.y,
+    midX,
+    midY
+  );
+
+  drawCtx.strokeStyle = drawColor.value;
+  drawCtx.lineWidth = Number(brushSize.value);
+  drawCtx.lineCap = "round";
+  drawCtx.lineJoin = "round";
+
+  drawCtx.stroke();
+
+  previousPoint = current;
+}
+
+
+function track() {
+
+  if (!running) return;
+
+  if (video.readyState >= video.HAVE_CURRENT_DATA) {
+
+    const point = findLED();
+
+    if (point) {
+      updateLEDMarker(point);
+      processPoint(point);
+    } else {
+      updateLEDMarker(null);
+
+      previousPoint = null;
+      smoothPoint = null;
+      drawingStarted = false;
+
+      status.textContent =
+        "⚪ Looking for a red or green LED...";
+    }
+  }
+
+  requestAnimationFrame(track);
+}
+
+
+function saveHistory() {
+
+  // Avoid too many history images
+  if (history.length > 20) {
+    history.shift();
+  }
+
+  history.push(
+    drawCtx.getImageData(
+      0,
+      0,
+      drawingCanvas.width,
+      drawingCanvas.height
+    )
+  );
+}
+
+
+undoBtn.addEventListener("click", () => {
+
+  if (!history.length) return;
+
+  const image = history.pop();
+
+  drawCtx.putImageData(image, 0, 0);
+
+  previousPoint = null;
+  smoothPoint = null;
+});
+
+
+clearBtn.addEventListener("click", () => {
+
+  saveHistory();
+
+  drawCtx.clearRect(
+    0,
+    0,
+    drawingCanvas.width,
+    drawingCanvas.height
+  );
+
+  previousPoint = null;
+  smoothPoint = null;
+});
+
+
+saveBtn.addEventListener("click", () => {
+
+  const exportCanvas =
+    document.createElement("canvas");
+
+  exportCanvas.width =
+    drawingCanvas.width;
+
+  exportCanvas.height =
+    drawingCanvas.height;
+
+  const exportCtx =
+    exportCanvas.getContext("2d");
+
+  exportCtx.fillStyle = "#000";
+  exportCtx.fillRect(
+    0,
+    0,
+    exportCanvas.width,
+    exportCanvas.height
+  );
+
+  exportCtx.drawImage(
+    drawingCanvas,
+    0,
+    0
+  );
+
+  const link =
+    document.createElement("a");
+
+  link.download =
+    "airdraw-v2.png";
+
+  link.href =
+    exportCanvas.toDataURL("image/png");
+
+  link.click();
+});
+
+
+window.addEventListener("resize", () => {
+  // Video resolution doesn't normally change,
+  // so the drawing remains safe.
+});
+</script>
+
+</body>
+</html>
